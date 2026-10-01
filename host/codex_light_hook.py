@@ -8,7 +8,8 @@ from pathlib import Path
 from codex_light_serial import send_command, send_event
 
 
-LOG_PATH = Path(__file__).with_name("codex_light_hook.log")
+LOG_PATH = (Path(os.environ["AGENTCORE_LIGHT_HOME"]) / "host/codex_light_hook.log"
+            if "AGENTCORE_LIGHT_HOME" in os.environ else Path(__file__).with_name("codex_light_hook.log"))
 STATE_DB_PATH = Path.home() / ".codex" / "state_5.sqlite"
 DEFAULT_TOKEN_BUDGET = 120000
 

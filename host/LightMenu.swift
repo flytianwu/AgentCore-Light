@@ -16,6 +16,8 @@ final class LightMenu: NSObject, NSApplicationDelegate {
     var refreshing = false
     var timer: Timer?
     var brightnessItems: [NSMenuItem] = []
+    let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/agentcore-host").path
+    var bundled: Bool { FileManager.default.isExecutableFile(atPath: helper) }
 
     init(root: String) { self.root = root; super.init() }
 
@@ -37,6 +39,10 @@ final class LightMenu: NSObject, NSApplicationDelegate {
         add("重新连接设备", #selector(control(_:)), "RECONNECT")
         add("立即同步周额度", #selector(syncQuota), nil)
         menu.addItem(.separator())
+        if bundled {
+            add("安装 / 更新后台服务…", #selector(setup), nil)
+            add("停止并移除后台服务…", #selector(uninstall), nil)
+        }
         feedback.isHidden = true; menu.addItem(feedback)
         add("打开运行日志", #selector(openLogs), nil)
         add("退出菜单栏（服务继续运行）", #selector(quit), nil)
@@ -44,6 +50,13 @@ final class LightMenu: NSObject, NSApplicationDelegate {
         refresh()
         timer = Timer(timeInterval: 5, target: self, selector: #selector(refresh), userInfo: nil, repeats: true)
         RunLoop.main.add(timer!, forMode: .common)
+        if bundled {
+            run(["doctor"]) { ok, text in
+                if ok, let data = text.data(using: .utf8),
+                   let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   value["configured"] as? Bool != true { self.setup() }
+            }
+        }
     }
 
     func add(_ title: String, _ action: Selector, _ value: String?) {
@@ -54,8 +67,14 @@ final class LightMenu: NSObject, NSApplicationDelegate {
     func run(_ arguments: [String], completion: @escaping (Bool, String) -> Void) {
         DispatchQueue.global(qos: .utility).async {
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: self.root + "/.venv/bin/python")
-            process.arguments = arguments
+            if self.bundled {
+                process.executableURL = URL(fileURLWithPath: self.helper)
+                process.arguments = arguments
+            } else {
+                process.executableURL = URL(fileURLWithPath: self.root + "/.venv/bin/python")
+                let script = arguments.first == "quota" ? "sync_weekly_quota.py" : "codex_light_serial.py"
+                process.arguments = [self.root + "/host/" + script] + arguments.dropFirst()
+            }
             let output = Pipe(); process.standardOutput = output; process.standardError = output
             do {
                 try process.run()
@@ -71,7 +90,7 @@ final class LightMenu: NSObject, NSApplicationDelegate {
 
     @objc func refresh() {
         guard !refreshing else { return }; refreshing = true
-        run([root + "/host/codex_light_serial.py", "status"]) { ok, text in
+        run(["bridge", "status"]) { ok, text in
             self.refreshing = false
             guard ok, let data = text.data(using: .utf8),
                   let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -141,7 +160,7 @@ final class LightMenu: NSObject, NSApplicationDelegate {
         if let value = sender.representedObject as? String { command(value) }
     }
     func command(_ value: String) {
-        run([root + "/host/codex_light_serial.py", "send", value]) { ok, text in
+        run(["bridge", "send", value]) { ok, text in
             self.feedback.title = ok ? "操作已完成" : String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(90))
             self.feedback.isHidden = false; self.refresh()
         }
@@ -149,10 +168,60 @@ final class LightMenu: NSObject, NSApplicationDelegate {
     @objc func syncQuota() {
         feedback.title = "正在同步周额度…"; feedback.isHidden = false
         let codex = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
-        run([root + "/host/sync_weekly_quota.py", "--codex", codex]) { ok, _ in
+        run(bundled ? ["quota"] : ["quota", "--codex", codex]) { ok, _ in
             self.feedback.title = ok ? "周额度已更新" : "同步失败 · 请查看运行日志"
             self.refresh()
         }
+    }
+    @objc func setup() {
+        run(["doctor"]) { ok, text in
+            guard ok, let data = text.data(using: .utf8),
+                  let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                self.showMessage("无法检查安装环境", text); return
+            }
+            let devices = value["devices"] as? [[String: String]] ?? []
+            guard !devices.isEmpty else {
+                self.showMessage("请连接 ESP32-C3", "使用支持数据传输的 USB 线连接 v3 状态灯，然后从菜单选择“安装 / 更新后台服务”。"); return
+            }
+            let alert = NSAlert()
+            alert.messageText = "安装 AgentCore Light 后台服务"
+            alert.informativeText = "将备份并更新本项目的登录项与 Codex hooks。退出菜单栏后仍会同步。不会烧录固件。请先将应用移到 Applications，安装后保持应用位置不变。"
+            alert.addButton(withTitle: "安装"); alert.addButton(withTitle: "取消")
+            let serial = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 420, height: 26))
+            serial.addItems(withTitles: devices.map { "\($0["serial_number"] ?? "") · \($0["port"] ?? "")" })
+            if let known = value["serial_number"] as? String,
+               let index = devices.firstIndex(where: { $0["serial_number"] == known }) { serial.selectItem(at: index) }
+            let codex = NSTextField(string: value["codex"] as? String ?? "")
+            codex.placeholderString = "Codex 可执行文件的完整路径"
+            let stack = NSStackView(views: [NSTextField(labelWithString: "设备"), serial,
+                                          NSTextField(labelWithString: "Codex 可执行文件"), codex])
+            stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
+            stack.frame = NSRect(x: 0, y: 0, width: 420, height: 110)
+            codex.widthAnchor.constraint(equalToConstant: 420).isActive = true
+            alert.accessoryView = stack
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            self.feedback.title = "正在安装后台服务…"; self.feedback.isHidden = false
+            self.run(["install", "--serial-number", devices[serial.indexOfSelectedItem]["serial_number"]!,
+                      "--codex", codex.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)]) { success, message in
+                self.showMessage(success ? "安装完成" : "安装失败", message)
+                self.refresh()
+            }
+        }
+    }
+    @objc func uninstall() {
+        let alert = NSAlert()
+        alert.messageText = "停止并移除后台服务？"
+        alert.informativeText = "移除本项目的登录项和 hooks，停止状态与额度同步。保留配置、日志和备份。"
+        alert.addButton(withTitle: "移除"); alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        run(["uninstall"]) { ok, text in
+            self.showMessage(ok ? "后台服务已移除" : "移除失败", text); self.refresh()
+        }
+    }
+    func showMessage(_ title: String, _ message: String) {
+        let alert = NSAlert(); alert.messageText = title; alert.informativeText = message
+        NSApp.activate(ignoringOtherApps: true); alert.runModal()
     }
     @objc func openLogs() { NSWorkspace.shared.open(URL(fileURLWithPath: root + "/host/device.log")) }
     @objc func quit() { NSApplication.shared.terminate(nil) }
@@ -192,9 +261,13 @@ if CommandLine.arguments.count == 3 && ["--render-title", "--render-scroll-title
     exit(0)
 }
 
-guard CommandLine.arguments.count == 2 else { fatalError("Expected project root argument") }
+let packaged = FileManager.default.isExecutableFile(atPath:
+    Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/agentcore-host").path)
+guard CommandLine.arguments.count == 2 || packaged else { fatalError("Expected project root argument") }
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let delegate = LightMenu(root: CommandLine.arguments[1])
+let root = packaged ? FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Application Support/AgentCore Light").path : CommandLine.arguments[1]
+let delegate = LightMenu(root: root)
 app.delegate = delegate
 app.run()

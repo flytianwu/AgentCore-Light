@@ -4,6 +4,7 @@ import argparse
 from contextlib import closing
 import json
 import logging
+import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import re
@@ -18,7 +19,7 @@ from serial.tools import list_ports
 from light_state import LightState, STATES
 from thread_reconcile import ThreadReconciler
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(os.environ.get("AGENTCORE_LIGHT_HOME", Path(__file__).resolve().parent.parent))
 SETTINGS = ROOT / ".local/device.json"
 STATUS_RE = re.compile(r"^STATUS:([A-Z_]+),TOKEN:(\d+),BRIGHTNESS:(\d+)")
 
@@ -187,7 +188,7 @@ class Service:
             cache_key = (scroll, title)
             if cache_key not in self.bitmap_cache:
                 try:
-                    result = subprocess.run([str(ROOT / ".local/AgentCore Light.app/Contents/MacOS/AgentCoreLight"),
+                    result = subprocess.run([os.environ.get("AGENTCORE_LIGHT_RENDERER", str(ROOT / ".local/AgentCore Light.app/Contents/MacOS/AgentCoreLight")),
                                              "--render-scroll-title" if scroll else "--render-title", title], capture_output=True, text=True,
                                             timeout=2, check=True)
                     bitmap = result.stdout.strip().upper()

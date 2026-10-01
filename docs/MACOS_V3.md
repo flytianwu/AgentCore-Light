@@ -2,6 +2,7 @@
 
 这是本项目的 macOS 自定义适配，不是厂商 Windows 控制台。
 运行依赖仍只有 Python 和 pyserial；菜单栏使用 macOS AppKit，无第三方 GUI 框架。
+独立 App 已内置上述运行依赖，无需源码目录；安装、使用及构建方法见 [README](../README.md#macos-独立-app-使用方法)。以下命令面向源码安装，配置位于项目目录；独立 App 的配置与日志位于 `~/Library/Application Support/AgentCore Light/`。
 
 ## 首次安装
 
