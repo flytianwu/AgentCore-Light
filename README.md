@@ -2,6 +2,23 @@
 
 **中文** | [English](#english)
 
+## 此 fork 的 macOS / v3 支持
+
+在原项目基础上新增 macOS Codex 状态灯适配，面向 **ESP32-C3 + 8 灯 WS2812 + SSD1306 OLED（v3 无蜂鸣器）**：
+
+- 原生菜单栏控制、登录启动、USB 自动重连及多任务状态协调。
+- 每个任务固定颜色，整圈走马灯每 5 秒切换任务。
+- OLED 显示真实 Chat Title，支持中文和长标题滚动，与任务状态同步。
+- 自动同步 Codex **周剩余额度**；待机亮灯数量表示剩余额度。
+
+**安装与协议说明：[macOS v3 适配](docs/MACOS_V3.md)** · [周额度同步](docs/TOKEN_SYNC_MACOS.md)
+
+旧版 Windows 脚本、蜂鸣器固件和原作者说明保留在下方；请按自己的硬件版本选择固件。
+本 fork 不提供原作者的成品销售服务，下方购买联系方式来自上游项目。
+
+---
+
+
 一个可开源复用的桌面状态灯项目：用 **ESP32-C3 Mini + WS2812 8灯环 + SSD1306 OLED+ 蜂鸣器** 显示 Codex 工作状态和 5h Token 百分比。
 
 > A BLE-powered status light for Cursor Agent, using ESP32-C3 to visualize AI coding states.
