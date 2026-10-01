@@ -45,6 +45,13 @@ class ThreadReconciler:
         self.next_check = 0
         self.missing = {}
 
+    def is_registered(self, session):
+        try:
+            with closing(sqlite3.connect(self.database.as_uri() + '?mode=ro', uri=True, timeout=0.05)) as db:
+                return db.execute('SELECT 1 FROM threads WHERE id=?', (session,)).fetchone() is not None
+        except (sqlite3.Error, OSError):
+            return None  # Absence and an unavailable database are different evidence.
+
     def reconcile(self, sessions, now):
         if now < self.next_check:
             return []

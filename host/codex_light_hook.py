@@ -145,7 +145,9 @@ def main():
 
     log(json.dumps({"at": datetime.now().astimezone().isoformat(), "event": event_name,
                     "tool": tool_name, "command": command, "thread_id": event.get("thread_id"),
-                    "session_id": event.get("session_id"), "turn_id": event.get("turn_id")}, ensure_ascii=False))
+                    "session_id": event.get("session_id"), "turn_id": event.get("turn_id"),
+                    "transcript_field_present": "transcript_path" in event,
+                    "session_has_transcript": bool(event.get("transcript_path"))}, ensure_ascii=False))
 
     token_percent = compute_token_percent(event)
     if token_percent is not None:

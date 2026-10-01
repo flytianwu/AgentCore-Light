@@ -117,6 +117,8 @@ class Service:
         self.settings = settings
         self.state = LightState()
         self.reconciler = ThreadReconciler()
+        self.pending_events = {}
+        self.pending_check_at = 0
         self.saved = {"brightness": 16, "enabled": True, "quota": None, "quota_at": None}
         if settings.exists():
             self.saved.update(json.loads(settings.read_text()))
@@ -213,11 +215,43 @@ class Service:
                 "quota_at": self.saved["quota_at"], "quota_stale": age is None or age > 900,
                 "error": self.error, "firmware_extended": self.device.extended}
 
+    def accept_event(self, event, now):
+        session = event.get("session_id")
+        if not isinstance(session, str) or not session or len(session) > 200 or event.get("state") not in STATES:
+            raise ValueError("Invalid session event")
+        canonical = self.state.aliases.get(session, session)
+        if event.get("event") in ("Stop", "SessionEnd", "Interrupt"):
+            self.pending_events.pop(session, None)
+            if canonical not in self.state.sessions and "transcript_path" in event and not event["transcript_path"]:
+                return  # A hidden task's completion must not light the ring either.
+        has_metadata = "transcript_path" in event
+        has_transcript = isinstance(event.get("transcript_path"), str) and bool(event["transcript_path"].strip())
+        if (has_metadata and not has_transcript and canonical not in self.state.sessions
+                and self.reconciler.is_registered(canonical) is not True):
+            if event.get("event") != "SessionStart":
+                self.pending_events[session] = (event, now)
+            logging.info("Deferred non-persisted session=%r event=%r", session, event.get("event"))
+            return
+        self.pending_events.pop(session, None)
+        self.state.event(event, now)
+
+    def promote_pending_events(self, now):
+        if not self.pending_events or now < self.pending_check_at:
+            return
+        self.pending_check_at = now + 1
+        for session, (event, at) in list(self.pending_events.items()):
+            if now - at >= 300:
+                self.pending_events.pop(session, None)
+            elif self.reconciler.is_registered(session) is True:
+                self.pending_events.pop(session, None)
+                self.state.event(event, now)
+                logging.info("Activated newly registered session=%r", session)
+
     def request(self, raw):
         now = time.monotonic()
         if raw.startswith("{"):
             event = json.loads(raw)
-            self.state.event(event, now)
+            self.accept_event(event, now)
             logging.info("event session=%r turn=%r name=%r state=%r source_session=%r",
                          event.get("session_id"), event.get("turn_id"), event.get("event"),
                          event.get("state"), event.get("source_session_id"))
@@ -259,6 +293,7 @@ class Service:
 
     def tick(self, force=False):
         now = time.monotonic()
+        self.promote_pending_events(now)
         for key, reason in self.reconciler.reconcile(self.state.sessions, now):
             logging.info("Removed session=%r reason=%s", key, reason)
         try:

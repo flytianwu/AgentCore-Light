@@ -75,9 +75,12 @@ def send_event(event, state):
                     if isinstance(event.get(key), str) and event[key].strip()), None)
     if not isinstance(session, str) or not session:
         return send_command(state, fallback_direct=False)
-    reply = request_daemon(json.dumps({"session_id": session,
-        "source_session_id": event.get("session_id"),
-        "turn_id": event.get("turn_id"), "event": event.get("hook_event_name"), "state": state}))
+    payload = {"session_id": session, "source_session_id": event.get("session_id"),
+               "turn_id": event.get("turn_id"), "event": event.get("hook_event_name"), "state": state}
+    # Preserve missing vs explicit null for older hooks and legacy callers.
+    if "transcript_path" in event:
+        payload["transcript_path"] = event["transcript_path"]
+    reply = request_daemon(json.dumps(payload))
     if reply != "QUEUED":
         raise RuntimeError("Session event was not accepted")
     return state
