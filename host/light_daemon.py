@@ -53,7 +53,8 @@ class Device:
     def exchange(self, command, accepts):
         self.connection.reset_input_buffer()
         self.connection.write((command + "\n").encode())
-        self.connection.flush()
+        # macOS flush()/tcdrain() can block beyond write_timeout. The bounded
+        # write plus the matching device ACK confirms delivery without draining.
         deadline = time.monotonic() + 1.2
         while time.monotonic() < deadline:
             line = self.connection.readline().decode("utf-8", errors="replace").strip()

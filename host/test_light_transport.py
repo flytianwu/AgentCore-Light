@@ -1,19 +1,91 @@
 """Exercise the real pyserial transport against a local pseudo-terminal device."""
 import os
+import json
 import pty
 import select
 import tempfile
 import threading
+import time
 import tty
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import serial
+
 from light_daemon import Device, Service
 
 
 class TransportTests(unittest.TestCase):
+    def test_acknowledged_commands_complete_when_os_drain_stalls(self):
+        # Simulate the observed macOS tcdrain stall at the OS boundary, while
+        # retaining real pyserial I/O, firmware replies and reconnect handling.
+        release_drain = threading.Event()
+        errors = []
+
+        def exercise():
+            try:
+                with patch('serial.serialposix.termios.tcdrain',
+                           side_effect=lambda fd: release_drain.wait()):
+                    self.exercise_transport('MAC2')
+            except BaseException as exc:
+                errors.append(exc)
+
+        worker = threading.Thread(target=exercise, daemon=True)
+        worker.start()
+        try:
+            worker.join(timeout=3)
+            self.assertFalse(worker.is_alive(), 'Acknowledged commands stalled waiting for OS drain')
+            if errors:
+                raise errors[0]
+        finally:
+            release_drain.set()
+            worker.join(timeout=3)
+
+    def test_missing_ack_disconnects_within_deadline_and_status_remains_available(self):
+        master, slave = pty.openpty()
+        tty.setraw(slave)
+        device = Device('silent-device')
+        try:
+            device.connection = serial.Serial(os.ttyname(slave), 115200, timeout=0.1, write_timeout=1)
+            # Isolate ACK timeout here; the separate regression above exercises
+            # a stalled OS drain without allowing the test process to hang.
+            with tempfile.TemporaryDirectory() as directory, \
+                 patch('serial.serialposix.termios.tcdrain', return_value=None):
+                service = Service(device, Path(directory) / 'settings.json')
+                started = time.monotonic()
+                service.tick()
+                self.assertLess(time.monotonic() - started, 2.5)
+                status = json.loads(service.request('HOST_STATUS'))
+                self.assertFalse(status['connected'])
+                self.assertIn('did not acknowledge BRIGHTNESS', status['error'])
+                self.assertIsNone(device.connection)
+                # The reconnect delay leaves the control plane responsive.
+                started = time.monotonic()
+                service.tick()
+                self.assertLess(time.monotonic() - started, 0.5)
+        finally:
+            device.close()
+            os.close(master)
+            os.close(slave)
+
+    def test_full_output_queue_times_out_without_waiting_for_drain(self):
+        master, slave = pty.openpty()
+        tty.setraw(slave)
+        device = Device('blocked-device')
+        try:
+            device.connection = serial.Serial(os.ttyname(slave), 115200, timeout=0.1, write_timeout=0.2)
+            # Nothing consumes the PTY's output, so a large write fills its queue.
+            started = time.monotonic()
+            with self.assertRaises(serial.SerialTimeoutException):
+                device.exchange('X' * 1_000_000, lambda reply: False)
+            self.assertLess(time.monotonic() - started, 1.5)
+        finally:
+            device.close()
+            os.close(master)
+            os.close(slave)
+
     def test_identity_ack_status_and_reconnect_replay(self):
         for version in ('MAC1', 'MAC2'):
             with self.subTest(version=version):

@@ -71,7 +71,7 @@ bundle = BUNDLE(coll, name='AgentCore Light.app',
     (contents / "Info.plist").write_bytes(plistlib.dumps({
         "CFBundleIdentifier": "com.garyjiang.agentcore-light-menu", "CFBundleName": "AgentCore Light",
         "CFBundleDisplayName": "AgentCore Light", "CFBundleExecutable": "AgentCoreLight",
-        "CFBundlePackageType": "APPL", "CFBundleVersion": "2", "CFBundleShortVersionString": "0.2.0",
+        "CFBundlePackageType": "APPL", "CFBundleVersion": "3", "CFBundleShortVersionString": "0.2.1",
         "LSMinimumSystemVersion": minimum, "LSUIElement": True, "NSHighResolutionCapable": True,
     }))
     for filename in ("README.md", "LICENSE"):

@@ -15,7 +15,7 @@
 
 ### macOS 独立 App 使用方法
 
-**下载：[v0.2.0 App 安装包（Apple Silicon）](https://github.com/flytianwu/AgentCore-Light/releases/download/v0.2.0/AgentCore-Light-macOS-arm64.zip)** · [Release 说明与 SHA-256 校验文件](https://github.com/flytianwu/AgentCore-Light/releases/tag/v0.2.0)
+**下载：[v0.2.1 App 安装包（Apple Silicon）](https://github.com/flytianwu/AgentCore-Light/releases/download/v0.2.1/AgentCore-Light-macOS-arm64.zip)** · [Release 说明与 SHA-256 校验文件](https://github.com/flytianwu/AgentCore-Light/releases/tag/v0.2.1)
 
 `AgentCore Light.app` 是原生菜单栏应用，内置 Python 和串口依赖。使用打包后的 App 不需要安装 Python、pip、Xcode 或保留项目源码；仍需安装并登录 Codex，以及已烧录 v3 固件的 ESP32-C3。MAC4 固件支持任务分色、中文 Chat Title 和长标题滚动，App 不会自动烧录固件。
 
