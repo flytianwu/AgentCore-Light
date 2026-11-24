@@ -11,6 +11,7 @@ import re
 import socket
 import sqlite3
 import subprocess
+import sys
 import time
 
 import serial
@@ -32,6 +33,10 @@ def validate_scroll_bitmap(value):
     return value
 
 
+class SilentHandshake(TimeoutError):
+    """No bytes arrived from the configured device during handshake."""
+
+
 class Device:
     def __init__(self, serial_number):
         self.serial_number = serial_number
@@ -43,6 +48,8 @@ class Device:
         self.titles_supported = False
         self.scroll_supported = False
         self.thread_frame = None
+        self.silent_connections = 0
+        self.next_usb_reset = 0
 
     def close(self):
         if self.connection:
@@ -62,18 +69,72 @@ class Device:
                 return line
         raise TimeoutError(f"Device did not acknowledge {command.split(':')[0]}")
 
+    def handshake(self):
+        # Keep the port and partial lines across probes. Opening the port again
+        # or purging RX here can discard a late PONG or the firmware's banner.
+        pending = bytearray()
+        oversized = False
+        evidence = set()
+        for attempt in range(1, 4):
+            self.connection.write(b"PING\n")
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
+                for byte in self.connection.read(128):
+                    if byte != 10:
+                        if len(pending) < 256:
+                            pending.append(byte)
+                        else:
+                            oversized = True
+                        continue
+                    line = bytes(pending).rstrip(b"\r")
+                    if not oversized and line == b"PONG:AGENTCORE-LIGHT-V3":
+                        if attempt > 1 or evidence:
+                            logging.info("PING confirmed on attempt %d (%s)", attempt,
+                                         ", ".join(sorted(evidence)) or "delayed reply")
+                        return
+                    if line.startswith((b"ESP-ROM:", b"rst:", b"ESP32-C3 AI Agent status light ready",
+                                        b"AgentCore-Light v3 firmware ready")):
+                        evidence.add("boot output")
+                    else:
+                        evidence.add("unexpected reply")
+                    pending.clear()
+                    oversized = False
+        if pending:
+            evidence.add("partial reply")
+        if not evidence:
+            raise SilentHandshake("Device did not acknowledge 3 PINGs: no bytes")
+        raise TimeoutError("Device did not acknowledge 3 PINGs: " + ", ".join(sorted(evidence)))
+
     def connect(self):
         ports = [p for p in list_ports.comports()
                  if p.vid == 0x303A and p.pid == 0x1001 and p.serial_number == self.serial_number]
         if len(ports) != 1:
+            self.silent_connections = 0
             raise ConnectionError("Configured ESP32 is absent or ambiguous")
-        self.port = ports[0].device
+        if self.silent_connections >= 3 and time.monotonic() >= self.next_usb_reset:
+            self.silent_connections = 0
+            self.next_usb_reset = time.monotonic() + 600
+            directory = (Path(sys.executable).parent if getattr(sys, "frozen", False)
+                         else ROOT / ".local/AgentCore Light.app/Contents/MacOS")
+            try:
+                subprocess.run([str(directory / "reenumerate-light"), self.serial_number],
+                               check=True, timeout=2, stdin=subprocess.DEVNULL)
+            except subprocess.SubprocessError as exc:
+                raise ConnectionError(f"USB re-enumeration failed: {exc}") from exc
+            raise ConnectionError("USB re-enumeration requested; waiting for device")
         try:
+            self.port = ports[0].device
             self.connection = serial.Serial(self.port, 115200, timeout=0.1, write_timeout=1)
             time.sleep(0.3)
-            self.exchange("PING", lambda s: s == "PONG:AGENTCORE-LIGHT-V3")
+            self.handshake()
+            self.silent_connections = 0
             self.status()
+        except SilentHandshake:
+            self.silent_connections += 1
+            self.close()
+            raise
         except Exception:
+            self.silent_connections = 0
             self.close()
             raise
 

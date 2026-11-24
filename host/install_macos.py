@@ -26,6 +26,9 @@ def main():
     contents = local / "AgentCore Light.app/Contents"
     executable = contents / "MacOS/AgentCoreLight"
     executable.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["xcrun", "clang", str(root / "host/reenumerate_light.m"), "-fobjc-arc",
+                    "-framework", "Foundation", "-framework", "IOKit",
+                    "-o", str(executable.with_name("reenumerate-light"))], check=True)
     subprocess.run(["xcrun", "swiftc", str(root / "host/LightMenu.swift"), "-o", str(executable),
                     "-module-cache-path", str(local / "swift-cache")], check=True)
     (contents / "Info.plist").write_bytes(plistlib.dumps({

@@ -64,6 +64,10 @@ bundle = BUNDLE(coll, name='AgentCore Light.app',
     contents = app / "Contents"
     documents = contents / "Resources/Documents"
     documents.mkdir(parents=True)
+    subprocess.run(["xcrun", "clang", str(root / "host/reenumerate_light.m"), "-fobjc-arc",
+                    "-framework", "Foundation", "-framework", "IOKit",
+                    "-target", f"{architecture}-apple-macos{minimum}",
+                    "-o", str(contents / "MacOS/reenumerate-light")], check=True)
     subprocess.run(["xcrun", "swiftc", str(root / "host/LightMenu.swift"), "-O",
                     "-target", f"{architecture}-apple-macos{minimum}",
                     "-o", str(contents / "MacOS/AgentCoreLight"),
@@ -71,7 +75,7 @@ bundle = BUNDLE(coll, name='AgentCore Light.app',
     (contents / "Info.plist").write_bytes(plistlib.dumps({
         "CFBundleIdentifier": "com.garyjiang.agentcore-light-menu", "CFBundleName": "AgentCore Light",
         "CFBundleDisplayName": "AgentCore Light", "CFBundleExecutable": "AgentCoreLight",
-        "CFBundlePackageType": "APPL", "CFBundleVersion": "3", "CFBundleShortVersionString": "0.2.1",
+        "CFBundlePackageType": "APPL", "CFBundleVersion": "4", "CFBundleShortVersionString": "0.2.2",
         "LSMinimumSystemVersion": minimum, "LSUIElement": True, "NSHighResolutionCapable": True,
     }))
     for filename in ("README.md", "LICENSE"):
